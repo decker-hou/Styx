@@ -1,0 +1,18 @@
+[gd_scene load_steps=3 format=2]
+
+[ext_resource path="res://assets/particle_heart.png" type="Texture" id=1]
+
+[sub_resource type="Gradient" id=1]
+colors = PoolColorArray( 1, 0, 0.953556, 1, 1, 0.554156, 0.864349, 1 )
+
+[node name="CPUParticles2D" type="CPUParticles2D"]
+position = Vector2( 8, 16 )
+rotation = 4.71239
+amount = 3
+texture = ExtResource( 1 )
+spread = 90.0
+gravity = Vector2( 0, 0 )
+initial_velocity = 10.0
+angle = 270.0
+color_ramp = SubResource( 1 )
+hue_variation_random = 1.0

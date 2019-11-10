@@ -1,0 +1,19 @@
+[gd_scene load_steps=2 format=2]
+
+[sub_resource type="Curve" id=1]
+resource_local_to_scene = true
+max_value = 2.0
+_data = [ Vector2( 0.00115699, 0.9768 ), 0.0, 0.998755, 0, 1, Vector2( 1, 1.9744 ), 0.998755, 0.0, 1, 0 ]
+
+[node name="CPUParticles2D" type="CPUParticles2D"]
+position = Vector2( 8, 16 )
+rotation = 4.71239
+amount = 4
+lifetime = 1.3
+emission_shape = 2
+emission_rect_extents = Vector2( 1, 8 )
+spread = 0.0
+gravity = Vector2( -6, 0 )
+initial_velocity = 15.0
+scale_amount_curve = SubResource( 1 )
+color = Color( 0.6, 0.2, 1, 1 )
