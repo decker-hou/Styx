@@ -1,33 +1,35 @@
 extends Node2D
 
 const TILE_SIZE = 16
-const MAP_SIZES = [1, 35, 40, 45]
-const MAP_SIZE = 35
-const ROOM_DENSITY = 900 #attempts to place rooms
-const ROOM_MIN = 5
-const ROOM_MAX = 10
-const doorChance = 0  #chance of redundant doors
+const MAP_SIZES = [
+  {'min': 3, 'max': 3},
+  {'min': 3, 'max': 4},
+  {'min': 3, 'max': 4},
+]
+const ROOM_SPAWN_ATTEMPTS = 5
 
 var level = 1
 
 var mapSize
+var mapRoomsX = 3  #we could randomize this for each level
+var mapRoomsY = 3
+const ROOM_SIZE = 6
+var RNG = RandomNumberGenerator.new()
+
 var map = []
-var roomMap = []
-var roomMapCopy = []
-var roomI = 0     #index of the rooms
 var enemies = []
 var rooms = []
 var items = []
 var npcs = []
 var interactables = []
 var astar_graph
+var tutCounter = 0 #mega hacky 
 
-enum Tile {Empty = -1, Player, Wall, Enemy, Item, Door, Floor, Exit, Walltop, Talker, HeldItem, Dummy, Pool, Consumable, Urn, ShopItem, Obstacle, LockedDoor, Interactable}
-const Enemy = preload("res://Enemy.tscn") 
-const Item = preload("res://Item.tscn")
-const HeldItem = preload("res://HeldItem.tscn")
+enum Tile {Empty = -1, Player, Wall, Enemy, Item, Door, Floor, Exit, Walltop, Talker, HeldItem, Dummy, Pool, Consumable, Urn, Healing, Obstacle, LockedDoor, EmptyPool}
+const Enemy = preload("res://entities/Enemy.tscn") 
+const Item = preload("res://items/BoonItem.tscn")
+const HeldItem = preload("res://items/HeldItem.tscn")
 
-const PrefabRooms = preload("res://PrefabRoom.tscn")
 var prefabRooms
 
 onready var player = $Player    
@@ -133,11 +135,10 @@ var Status = {
     shortText = "death defy!", 
     textColor = Color.lightgray},
 }
-
-var tutCounter = 0 #mega hacky 
   
 func _ready():
   randomize()
+  var PrefabRooms = preload("res://prefabs/PrefabRoom.tscn")
   prefabRooms = PrefabRooms.instance()
   init()
   
@@ -167,62 +168,35 @@ func fade_out_level_screen():
 func init():  
   clear_entities()
   $Keepsakes.shuffle_spawntables()
-  if Global.tutorialStage or Global.debug:
-    if Global.debug:
-      scene = "Debug"
-      $TutorialMap.clear()
-    else:
-      tilemap = $TutorialMap
-      scene = "Tutorial"
-      $TileMap.queue_free()  #idk it was causing problems with tutorial map visibility
-      player.boons = []
-      player.deck = [null, null, null, null, null]
-      tilemap.visible = true
-      $Instructions.visible = true
-      
-    Global.tutorialStage = false
-    Global.debug = false
-      
-    tilemap_to_map()
-    make_pathfinding_graph()
-
-  else:
+  if Global.tutorialStage or Global.debug:  #special maps
+    init_special_maps()
+  else:  #general dungeon gen
+    tilemap.visible = true
     player.input = false
     fade_out_level_screen()
     player.input = true
-      
     $TutorialMap.clear()
+    $TutorialMap.visible = false
     if level == 4:
-      var room = prefabRooms.get_boss_room()
-      tilemap.clear()
-      for x in range(room.bounds.x):
-        for y in range(room.bounds.y):
-          tilemap.set_cell(x, y, room.tilemap.get_cell(x,y) )
-      tilemap_to_map()
-      make_pathfinding_graph()
-      rooms.append(room)
-      
-      player.input = false
-      upgrade_visibility_map()
-      yield(get_tree().create_timer(1.5), "timeout")
-      $UI/Dialog.open(rooms[0].data.enterDialog)
-      player.input = true
-      
+      init_boss_room()
     else:
-      mapSize = Vector2(MAP_SIZES[level], MAP_SIZES[level])
+      var ranges = MAP_SIZES[level-1]
+      mapRoomsX = RNG.randi_range(ranges['min'], ranges['max'])
+      mapRoomsY = RNG.randi_range(ranges['min'], ranges['max'])
+      mapSize = Vector2(ROOM_SIZE*mapRoomsX+1, ROOM_SIZE*mapRoomsY+1)
       build_level()
       spawn_stuff()
+      upgrade_player_visuals()
+      call_deferred("update_visibility_map")
     
   $UI/Minimap.init()
-  call_deferred("upgrade_visuals")
     
 func place_tile(x, y, tile): 
   map[x][y] = (tile)
-  if tile == Tile.Enemy or tile == Tile.Player or tile == Tile.Item or tile == Tile.HeldItem: 
-    tilemap.set_cell(x, y, Tile.Floor)  #don't put enemy sprites on tilemap
+  if tile == Tile.Enemy or tile == Tile.Player or tile == Tile.Item or tile == Tile.HeldItem or tile == Tile.Talker:
+    tilemap.set_cell(x, y, Tile.Floor)  #this isn't empty because enemies moving into tiles :/
   else:
     tilemap.set_cell(x, y, tile) 
-    
   tilemap.update_bitmask_area ( Vector2(x, y) )
     
 #don't call this during initial generation, this updates the AStar map
@@ -236,12 +210,12 @@ func change_tile(x, y, tile):
     
 func copy_tile(tmap, xo, yo, x, y):
   var tile = tmap.get_cell(xo, yo)
-  if tile == Tile.Enemy or tile == Tile.Player or tile == Tile.Item or tile == Tile.HeldItem or tile == Tile.Dummy or tile == Tile.Consumable or tile == Tile.ShopItem: 
+  if tile == Tile.Enemy or tile == Tile.Player or tile == Tile.Item or tile == Tile.HeldItem or tile == Tile.Dummy or tile == Tile.Consumable or tile == Tile.Talker: 
     tmap.set_cell(x, y, -1)
     
   map[x][y] = tile
   if tile == Tile.Dummy or tile == Tile.Obstacle: map[x][y] = Tile.Enemy
-  elif tile == Tile.Consumable or tile == Tile.ShopItem: map[x][y] = Tile.HeldItem
+  elif tile == Tile.Consumable: map[x][y] = Tile.HeldItem
   
   #instantiate entities
   if tile == Tile.Player:
@@ -252,15 +226,13 @@ func copy_tile(tmap, xo, yo, x, y):
   elif tile == Tile.Obstacle:
     instantiate_enemy(x, y, "tutorial")
   elif tile == Tile.Dummy:
-    var e = instantiate_enemy(x, y, "skelly")
+    instantiate_enemy(x, y, "skelly")
   elif tile == Tile.Item:
     instantiate_boon(x, y)
   elif tile == Tile.HeldItem:
     instantiate_held_item(x, y, "keepsakes")
   elif tile == Tile.Consumable:
     instantiate_held_item(x, y, "consumables")
-  elif tile == Tile.ShopItem:
-    instantiate_held_item(x, y, "shop")
   
 func tilemap_to_map():  
   map.clear()
@@ -288,48 +260,147 @@ func find_room_bounds(tmap):
       max_y = int(pos.y)
   return Vector2(int(max_x+1), int(max_y+1))
   
+func init_boss_room():
+  var room = prefabRooms.get_boss_room()
+  tilemap.clear()
+  for x in range(room.bounds.x):
+    for y in range(room.bounds.y):
+      tilemap.set_cell(x, y, room.tilemap.get_cell(x,y) )
+  tilemap_to_map()
+  make_pathfinding_graph()
+  rooms.append(room)
+  
+  player.input = false
+  call_deferred("update_visibility_map")
+  yield(get_tree().create_timer(1.5), "timeout")
+  $UI/Dialog.open(rooms[0].data.enterDialog)
+  player.input = true
+  
+func init_special_maps():
+  if Global.debug:
+    scene = "Debug"
+    $TutorialMap.clear()
+    $TutorialMap.visible = false
+  else:
+    tilemap = $TutorialMap
+    scene = "Tutorial"
+    $TileMap.queue_free()  #idk it was causing problems with tutorial map visibility
+    $TutorialMap.assignNpcs()
+    player.boons = []
+    player.deck = [null, null, null, null, null]
+    tilemap.visible = true
+    
+  Global.tutorialStage = false
+  Global.debug = false
+    
+  tilemap_to_map()
+  make_pathfinding_graph()
+  for x in range(mapSize.x):
+    map.append([])
+    for y in range(mapSize.y):
+      visibilitymap.set_cell(x, y, 0)
+  call_deferred("update_visibility_map")
+    
+    
 #########generating dungeons
+#0 = no room
+#1 = regular room where stuff can spawn
+#2 = special room where you don't spawn stuff ie shop
+var roomsMap = []
 
 func build_level():
   map.clear()
   tilemap.clear()
-  roomMap.clear()
   visibilitymap.clear()
-  roomI = 0
+  roomsMap.clear()
+  rooms.clear()
+  
   #fill map with walls
   for x in range(mapSize.x):
     map.append([])
-    roomMap.append([])
     for y in range(mapSize.y):
       map[x].append(Tile.Wall)
       tilemap.set_cell(x, y, Tile.Wall)
       visibilitymap.set_cell(x, y, 0)
-      roomMap[x].append(-1)
-    
-  #add prefab rooms here. prefab rooms can be irregularly shaped
-  add_prefab_rooms()
   
-  #add regular random square rooms
-  for i in range(ROOM_DENSITY):
-    try_add_room()
-    
-  #adding corridors
-  place_maze()
+  #fill roomsMap
+  for i in range(mapRoomsX):
+    roomsMap.append([])
+    for j in range(mapRoomsY):
+      roomsMap[i].append(0)
+        
+  var a = false
+  while a == false:
+    rooms.clear()
+    #fill map with walls
+    for x in range(mapSize.x):
+      for y in range(mapSize.y):
+        map[x][y] = Tile.Wall
+        tilemap.set_cell(x, y, Tile.Wall)
+    #fill roomsMap
+    for i in range(mapRoomsX):
+      for j in range(mapRoomsY):
+        roomsMap[i][j] = 0
+
+    a = make_main_path()
   
-  roomMapCopy = roomMap.duplicate(true)
-  place_doors()
-  remove_dead_ends()
+  place_extra_rooms()
   
   make_pathfinding_graph()
   tilemap.update_bitmask_region()
   
-#find a place to add the prefab rooms
-func add_prefab_rooms():
-  var prefabs = prefabRooms.get_prefab_rooms()
+#this just adds an empty square room  
+func add_room(x, y):
+  roomsMap[x][y] = 1
+  for i in range(1, ROOM_SIZE):
+    for j in range(1, ROOM_SIZE):
+      place_tile(x*ROOM_SIZE+i, y*ROOM_SIZE+j, Tile.Floor)  
+  rooms.append({'x0': x*ROOM_SIZE,'y0': y*ROOM_SIZE, 'w': ROOM_SIZE, 'h': ROOM_SIZE})
   
-  for r in prefabs:
-    try_add_prefab_room(r)
+#for spawning the main path
+#slightly weighted towards south and east
+func add_door_to_room(x, y, dir):
+  var half = ceil(ROOM_SIZE/2)
+  match dir:
+    Vector2(0,-1): #n
+      place_tile(x*ROOM_SIZE+half, y*ROOM_SIZE, Tile.Door) 
+    Vector2(-1,0): #w
+      place_tile(x*ROOM_SIZE, y*ROOM_SIZE+half, Tile.Door) 
+    Vector2(0,1): #s
+      place_tile(x*ROOM_SIZE+half, y*ROOM_SIZE+ROOM_SIZE, Tile.Door) 
+    Vector2(1,0): #e
+      place_tile(x*ROOM_SIZE+ROOM_SIZE, y*ROOM_SIZE+half, Tile.Door) 
+ 
+func get_next_room(x, y):
+  var dirs = []
+  if x > 0 and roomsMap[x-1][y] == 0: dirs.append(Vector2(-1,0))  
+  if y > 0 and roomsMap[x][y-1] == 0: dirs.append(Vector2(0,-1))
+  if x < mapRoomsX-1 and roomsMap[x+1][y] == 0: 
+    dirs.append(Vector2(1,0)) 
+    dirs.append(Vector2(1,0)) 
+  if y < mapRoomsY-1 and roomsMap[x][y+1] == 0: 
+    dirs.append(Vector2(0,1))
+    dirs.append(Vector2(0,1))
   
+  if dirs.size() == 0: return null
+  return dirs[randi() % dirs.size()]
+  
+func make_main_path():
+  var x = 0
+  var y = 0
+  while (x != mapRoomsX-1 or y != mapRoomsY-1):
+    add_room(x, y)
+    var dir = get_next_room(x, y)
+    if dir == null: 
+      return false
+    add_door_to_room(x, y, dir)
+    x += dir.x
+    y += dir.y
+    
+  add_room(x, y)
+  prefabRooms.place_prefab_room(self, x*ROOM_SIZE+1, y*ROOM_SIZE+1, "Exit")  #temp hack so the walls don't overwrite the door
+  return true
+      
 func copy_tilemap_to_map(tmap, x0, y0, width, height, data):
   for x in range(width):
     for y in range(height):
@@ -337,212 +408,49 @@ func copy_tilemap_to_map(tmap, x0, y0, width, height, data):
       if tile != Tile.Empty:
         
         copy_tile(tmap, x, y, x0+x, y0+y)
-        var setTile = Tile.Empty if tile == Tile.ShopItem else tile  #VERY temp solution
-        tilemap.set_cell(x0+x, y0+y, setTile)
+        tilemap.set_cell(x0+x, y0+y, tile)
         if tile == Tile.Talker:
           var npc = data.npc
           npc["tile"] = Vector2(x0+x, y0+y)
           npcs.append(data.npc)
-        if tile == Tile.Floor: 
-          roomMap[x0+x][y0+y] = roomI
   
 func place_prefab_room(x0, y0, data):
   copy_tilemap_to_map(data.tilemap, x0, y0, data.bounds.x, data.bounds.y, data.data)
   if data.tilemap.script: 
     data.tilemap.init(x0, y0, self)
-  rooms.append({x0= x0,y0= y0, w= data.bounds.x, h= data.bounds.y, data=data.data})
-  roomI += 1
-  
-func try_add_prefab_room(data, attempts = 10):
-  var w = data.bounds.x
-  var h = data.bounds.y
     
-  for i in range(attempts):
-    var x0 = floor( rand_range(1,  (mapSize.x - data.bounds.x) ) )
-    var y0 = floor( rand_range(1,  (mapSize.y - data.bounds.y) ) )
-    assert (  x0 + w < mapSize.x and y0 + h < mapSize.y)
-    var overlaps = false
-    for r in rooms:
-      if x0-1 < r.x0 + r.w && x0-1 + w+2 > r.x0 && y0-1 < r.y0 + r.h && y0-1 + h+2 > r.y0:
-        overlaps = true
-        break
-    if not overlaps: 
-      place_prefab_room(x0, y0, data)
-      return
-  print("failed to place room")
+#for now this just places shop
+func place_extra_rooms():
+  for i in range(ROOM_SPAWN_ATTEMPTS):
+    var spots = []
+    for x in range(mapRoomsX):
+      for y in range(mapRoomsY):
+        if roomsMap[x][y] == 0:
+          if x > 0 and roomsMap[x-1][y] == 1: 
+            spots.append( [Vector2(x, y), Vector2(-1, 0)] ) 
+          if y > 0 and roomsMap[x][y-1] == 1: 
+            spots.append( [Vector2(x, y), Vector2(0, -1)] ) 
+          if x < mapRoomsX-1 and roomsMap[x+1][y] == 1: 
+            spots.append( [Vector2(x, y), Vector2(1, 0)] ) 
+          if y < mapRoomsY-1 and roomsMap[x][y+1] == 1: 
+            spots.append( [Vector2(x, y), Vector2(0, 1)] ) 
        
-#every tile in each room labelled by room #
-func place_room(x0, y0, w, h):
-  rooms.append({'x0': x0,'y0': y0, 'w': w, 'h': h})
-  for x in range(w):
-    for y in range(h):
-      var xc = x0 + x
-      var yc = y0 + y
-      place_tile(xc, yc, Tile.Floor)
-      roomMap[xc][yc] = roomI
-  roomI += 1
-  
-#attempt to place down a random rectangular room
-func try_add_room():
-  var w = randi() % (ROOM_MAX-ROOM_MIN) + ROOM_MIN
-  var h = randi() % (ROOM_MAX-ROOM_MIN) + ROOM_MIN
-  var x0 = randi() % (int(mapSize.x-1)) + 1
-  var y0 = randi() % (int(mapSize.y-1)) + 1
-  
-  if x0 + w >= mapSize.x or y0 + h >= mapSize.y:
-    return
-    
-  #check overlapping rooms
-  for r in rooms:
-    if x0-1 < r.x0 + r.w && x0-1 + w+2 > r.x0 && y0-1 < r.y0 + r.h && y0-1 + h+2 > r.y0:
-      return
+    if spots.size() == 0: return
+    #in the future multiple extra rooms can be placed here
+    var pos = spots[randi() % spots.size()]
+    var roomPos = pos[0]
+    var door = pos[1]
+    add_room(roomPos.x, roomPos.y)
+
+    if i == 1: 
+      prefabRooms.place_prefab_room(self, roomPos.x*ROOM_SIZE, roomPos.y*ROOM_SIZE, "Shop")
+      roomsMap[roomPos.x][roomPos.y] = 2
+    else:
+      var roomName = prefabRooms.get_random_regular_room()
+      prefabRooms.place_prefab_room(self, roomPos.x*ROOM_SIZE, roomPos.y*ROOM_SIZE, roomName)
       
-  place_room(x0, y0, w, h)
+    add_door_to_room(roomPos.x, roomPos.y, door)
   
-func check_surroundings(x, y):
-  for i in range(x-1, x+2):
-    for j in range(y-1, y+2):
-      if map[i][j] != Tile.Wall:
-        return false
-  return true
-  
-func place_maze():
-  #iterate through every tile looking for a 3x3 solid area
-  var done = false
-  while not done:
-    done = true
-    for x in range(1, mapSize.x-1):
-      for y in range(1, mapSize.y-1):
-        if check_surroundings(x, y):
-          done = false
-          start_maze(x, y) #run the algo here
-          roomI += 1
-  
-func find_frontiers(x, y):
-  var frontiers = []
-  var dirs = [
-    [Vector2(x-1, y), x-2, x,   y-1, y+2 ],  #left 
-    [Vector2(x+1, y), x+1, x+3, y-1, y+2 ], #right
-    [Vector2(x, y-1), x-1, x+2, y-2, y], #up
-    [Vector2(x, y+1), x-1, x+2, y+1, y+3] #down
-    ]
-  for f in dirs:
-    var valid = true
-    for i in range(f[1], f[2]):
-      for j in range(f[3], f[4]):
-        if i < 0 or j < 0 or i >= mapSize.x or j >= mapSize.y: 
-          valid = false
-          break
-        if map[i][j] != Tile.Wall:
-          valid = false
-    if valid: frontiers.append(f)
-  frontiers.shuffle()
-  return frontiers
-  
-func start_maze(xi, yi):
-  place_tile(xi, yi, Tile.Floor)
-  roomMap[xi][yi] = roomI
-  var frontiers = find_frontiers(xi, yi)
-
-  while frontiers.size() > 0:
-    #var f = frontiers.pop_back() 
-    var f = frontiers[randi() % frontiers.size()]
-    frontiers.erase(f)
-    
-    var valid = true
-    for i in range(f[1], f[2]):
-      for j in range(f[3], f[4]):
-        if map[i][j] != Tile.Wall:
-          valid = false
-          break
-        
-    if valid:
-      place_tile(f[0].x, f[0].y, Tile.Floor)
-      roomMap[f[0].x][f[0].y] = roomI
-      frontiers = frontiers + find_frontiers(f[0].x, f[0].y)
-  
-func find_potential_doors():
-  var potential_doors = []
-  for x in range(1, mapSize.x-1):
-    for y in range(1, mapSize.y-1):
-      if map[x][y] == Tile.Wall:
-        var valid = false
-        var r1
-        var r2
-        if map[x-1][y] == Tile.Floor && map[x+1][y] == Tile.Floor:
-          r1 = roomMap[x-1][y]
-          r2 = roomMap[x+1][y]
-          if r1 != r2: 
-            valid = true
-          
-        elif map[x][y-1] == Tile.Floor && map[x][y+1] == Tile.Floor:
-          r1 = roomMap[x][y-1]
-          r2 = roomMap[x][y+1]
-          if r1 != r2: 
-            valid = true
-          
-        if valid:
-          potential_doors.append({'x': x, 'y': y, 'r1': r1, 'r2': r2})
-  potential_doors.shuffle()
-  return potential_doors
-     
-var room_dict = {}
-
-func place_doors():
-  var doors = find_potential_doors()
-  
-  for i in range(roomI):
-    room_dict[i] = i
-
-  while doors.size() > 0:
-    var door = doors.pop_front()
-    var r1 = door.r1
-    var r2 = door.r2
-    
-    place_tile(door.x, door.y, Tile.Door)
-    
-    var p = room_dict[r1]
-    if p != r1: room_dict[room_dict[r1]] = room_dict[r2]
-
-    room_dict[r1] = room_dict[r2]     #d[4] = 5         what if d[5] == 6     then d[4] = 6?
-    for k in range(roomI):
-      if room_dict[k] == p: room_dict[k] = room_dict[r1]      #d[2] = 4  -> d[2] = 6
-
-
-    for i in range(doors.size()-1, -1, -1):
-      var d = doors[i]
-      #if room_dict[d.r1] == room_dict[d.r2]:    #uncomment this line for spanning tree dungeon
-      if (d.r1 == r1 and d.r2 == r2) or (d.r2 == r1 and d.r1 == r2):   #uncomment this line for lots of doors
-        var next_to_door = false
-        for k in range(d.x-1, d.x+2):
-          for l in range(d.y-1, d.y+2):
-            if map[k][l] == Tile.Door: next_to_door = true
-
-        if randf() < doorChance and not next_to_door: 
-          place_tile(d.x, d.y, Tile.Door)
-        doors.remove(i)
-  
-func is_dead_end(x, y):
-  var c = 0
-  if map[x][y] != Tile.Floor and map[x][y] != Tile.Door: return false
-  if map[x-1][y] == Tile.Wall: c += 1
-  if map[x+1][y] == Tile.Wall: c += 1
-  if map[x][y-1] == Tile.Wall: c += 1
-  if map[x][y+1] == Tile.Wall: c += 1
-  return c >= 3
-  
-func remove_dead_ends():
-  var done = false
-  while not done:
-    done = true
-    for x in range(1, mapSize.x-1):
-      for y in range(1, mapSize.y-1):
-        if is_dead_end(x, y):
-          place_tile(x, y, Tile.Wall)
-          done = false
-      
-func fancify_sprites():
-  pass
 
 #####pathfinding graph building functions 
 
@@ -626,7 +534,7 @@ func instantiate_held_item(x, y, list):
   var instance = HeldItem.instance()
   add_child(instance)
   var item = $Keepsakes.pick_from_spawnTable(list)
-  instance.init(x, y, item, list=="shop")
+  instance.init(x, y, item)
   return instance
 
 func get_adjacent_tiles(x, y):
@@ -635,57 +543,55 @@ func get_adjacent_tiles(x, y):
 func get_room_center(room):
   return Vector2(room.x0 + int(room.w/2), room.y0 + int(room.h/2))
   
-#returns an empty floor tile, not next to the walls. hopefully the room isn't full
-func get_random_spot_in_room(room):
+#returns an empty floor tile, hopefully the room isn't full
+func get_random_spot_in_room(xr, yr):
   var tile = Tile.Empty
   var x
   var y
   while tile != Tile.Floor:
-    var randw = randi() % int(room.w-2) + 1
-    var randh = randi() % int(room.h-2) + 1
-    x = room.x0 + randw
-    y = room.y0 + randh
+    var randw = randi() % int(ROOM_SIZE-1)
+    var randh = randi() % int(ROOM_SIZE-1)
+    x = xr*ROOM_SIZE + randw + 1
+    y = yr*ROOM_SIZE + randh + 1
     tile = map[x][y]
   return Vector2(x, y)
   
 #returns a spot against a wall, not against the door
-func get_random_edge_in_room(room):
-  var pos
+func get_random_edge_in_room(xr, yr):
   while true:
-    var randw = randi() % int(room.w)
-    var randh = randi() % int(room.h)
-    var x = room.x0 + randw
-    var y = room.y0 + randh
+    var randw = randi() % int(ROOM_SIZE-1)
+    var randh = randi() % int(ROOM_SIZE-1)
+    var x = xr*ROOM_SIZE + randw
+    var y = yr*ROOM_SIZE + randh
     
     if map[x][y] == Tile.Floor:
       var neighbours = get_adjacent_tiles(x, y)
       if neighbours.has(Tile.Wall) and not neighbours.has(Tile.Door):
         return Vector2(x, y)
+        
+func get_center_of_room(x, y):
+  var half = ceil(ROOM_SIZE / 2)
+  return Vector2(x*ROOM_SIZE+half, y*ROOM_SIZE+half)
   
 func spawn_stuff():
-  player.tile = get_room_center(rooms[0])
+  player.tile = Vector2(3,3)
+  #place_tile(mapSize.x-4, mapSize.y-4, Tile.Exit)   #temporary
   
-  for r in rooms:
-    if r.get("data") and r.data.noUrns: pass
-    else:
-      var urns = randi() % 6
+  for x in range(mapRoomsX):
+    for y in range(mapRoomsY):
+      if roomsMap[x][y] != 1: continue  #no room here
+        
+      var urns = randi() % 4
       for j in urns:
-        var c = get_random_edge_in_room(r)
+        var c = get_random_edge_in_room(x, y)
         place_tile(c.x, c.y, Tile.Urn)
         
-    if r.get("data") and r.data.noSpawns:
-      pass
-    else:
-      if not Global.noEnemies:
-        var num_enemies = (randi() % 3) + 1
-        for j in num_enemies:
-          var c = get_random_spot_in_room(r)
-          place_tile(c.x, c.y, Tile.Enemy)
-          instantiate_enemy(c.x, c.y, "tartarus")
-    
-      var c = get_random_spot_in_room(r)
+      if (x == 0 and y == 0) or (x == mapRoomsX-1 and y == mapRoomsY-1): continue
+
+      #spawning items
+      var c = get_center_of_room(x,y)
       var rand = randf()
-      if rand < 0.40:      #boon
+      if rand < 0.40:      #40% boon
         place_tile(c.x, c.y, Tile.Item)
         instantiate_boon(c.x, c.y)
       elif rand < 0.60:  #20%
@@ -694,43 +600,51 @@ func spawn_stuff():
       else:  #40%
         place_tile(c.x, c.y, Tile.HeldItem)
         var i = instantiate_held_item(c.x, c.y, "consumables")
-  
-######called whenever Player handles an action
-#####turnPass is a parameter for meg's chain attack
-func turn(timePass, turnPass=true):
-  player.upgrade_visuals()
-  call_deferred("update_visibility_map")
-    
-  if timePass:
-    player.input = false
-    yield(get_tree().create_timer(0.08), "timeout")
-    player.input = true
       
-    if not turnPass: #hacky meg stuff
-      enemies[0].act()
-        
-    if turnPass: 
-      for e in enemies:
-        if visibilitymap.get_cell(e.tile.x, e.tile.y) != 0:
-          e.act()
-         
-      player.turn()
-      for e in enemies:
-        if visibilitymap.get_cell(e.tile.x, e.tile.y) != 0:
-          e.turn()
-          
-    call_deferred("upgrade_visuals")
-  else: #you pressed like 1-5 keys
+      if not Global.noEnemies:
+        var num_enemies = (randi() % 4)
+        for j in num_enemies:
+          var pos = get_random_spot_in_room(x, y)
+          place_tile(pos.x, pos.y, Tile.Enemy)
+          instantiate_enemy(pos.x, pos.y, "tartarus")
+
+####this is called whenever player handles an input
+######timePass is whether the enemies get to act
+func turn(timePass):
+  upgrade_player_visuals()
+
+  if timePass:
+    var ems = []
     for e in enemies:
       if visibilitymap.get_cell(e.tile.x, e.tile.y) != 0:
-        e.display_accumulated_damage()
-    player.upgrade_visuals()
+        if e.data.name != "Obstacle" and e.data.name != "Skelly": ems.append(e)  
+    
+    if (ems.size() > 0):
+      player.input = false
+      yield(get_tree().create_timer(0.4), "timeout")
+          
+    for e in enemies:
+      if visibilitymap.get_cell(e.tile.x, e.tile.y) != 0:
+        if e.data.name != "Obstacle" and e.data.name != "Skelly":
+          e.pointer.visible = true
+          yield(get_tree().create_timer(0.5), "timeout")
+          e.pointer.visible = false
+        e.act()
+        upgrade_enemy_visuals(e)
+       
+    #end of turn actions like taking status damage
+    player.input = false
+    player.turn()
+    for e in enemies:
+      e.turn()
+    player.input = true
+
   if $UI/UIBar: $UI/UIBar.update()
 
 func tile_center(pos):
   return pos + Vector2(TILE_SIZE / 2, TILE_SIZE / 2)
   
-func upgrade_visibility_map():
+func update_visibility_map():
   var playerCenter = tile_center(player.tile * 16)
   var spaceState = get_world_2d().direct_space_state
   for x in range(mapSize.x):
@@ -745,40 +659,30 @@ func upgrade_visibility_map():
       else:
         if visibilitymap.get_cell(x, y) == -1:
           visibilitymap.set_cell(x, y, 1)      #half visible
-          
-#called at the end of turn after all state changes happened
-func upgrade_visuals():
-  player.input = false
-    
-  upgrade_visibility_map()
-  player.upgrade_visuals()
-  $UI/UIBar.update()
-    
-  var wait = false
+  update_enemies_visibility()
+   
+func update_enemies_visibility():
   for e in enemies:
     e.upgrade_visibility()
-    if e.visible: wait = true
-    e.display_accumulated_damage()
-    
-  #if wait: yield(get_tree().create_timer(0.15), "timeout")
-  
+           
+func upgrade_player_visuals():
+  call_deferred("update_visibility_map")
+  player.upgrade_visuals()
+  if $UI/UIBar: $UI/UIBar.update()
   for e in enemies:
-    e.upgrade_visuals()  
+    e.display_accumulated_damage()
   
+func upgrade_enemy_visuals(e):
+  e.upgrade_visuals()
+  e.display_accumulated_damage()
   player.display_accumulated_damage()
   $UI/UIBar.update()
-  
-  #if wait: yield(get_tree().create_timer(0.1), "timeout")
-  
-  if player.missTurn: 
-    player.missTurn = false
-    turn(true, false)
-    
-  player.input = true
   
 func _input(event):
   if !event.is_pressed():
     return
+  #call_deferred("update_visibility_map")
+  #upgrade_visibility_map()
   if event.is_action_pressed("debug"):
       Global.debug = true
       get_tree().change_scene("res://Game.tscn")

@@ -1,0 +1,21 @@
+[remap]
+
+importer="wav"
+type="AudioStreamSample"
+path="res://.import/talk_high.wav-b62f0472c0f5afc999ead1e07e38867d.sample"
+
+[deps]
+
+source_file="res://assets/audio/talk_high.wav"
+dest_files=[ "res://.import/talk_high.wav-b62f0472c0f5afc999ead1e07e38867d.sample" ]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=true
+edit/normalize=true
+edit/loop=false
+compress/mode=0

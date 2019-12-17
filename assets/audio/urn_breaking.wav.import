@@ -1,0 +1,21 @@
+[remap]
+
+importer="wav"
+type="AudioStreamSample"
+path="res://.import/urn_breaking.wav-840b0a1eed5eeb7b00c20bf64e1239e5.sample"
+
+[deps]
+
+source_file="res://assets/audio/urn_breaking.wav"
+dest_files=[ "res://.import/urn_breaking.wav-840b0a1eed5eeb7b00c20bf64e1239e5.sample" ]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=true
+edit/normalize=true
+edit/loop=false
+compress/mode=0

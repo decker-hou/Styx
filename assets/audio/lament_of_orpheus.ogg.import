@@ -1,0 +1,15 @@
+[remap]
+
+importer="ogg_vorbis"
+type="AudioStreamOGGVorbis"
+path="res://.import/lament_of_orpheus.ogg-5e8b8a7d93529fc0e1bc354c4fbc3591.oggstr"
+
+[deps]
+
+source_file="res://assets/audio/lament_of_orpheus.ogg"
+dest_files=[ "res://.import/lament_of_orpheus.ogg-5e8b8a7d93529fc0e1bc354c4fbc3591.oggstr" ]
+
+[params]
+
+loop=true
+loop_offset=0

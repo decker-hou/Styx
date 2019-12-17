@@ -2,7 +2,8 @@ extends Node
 
 #global should only be used sparingly for things that need to be preserved between scenes
 
-var noEnemies = false
+var startScreen = false
+var noEnemies = true
 var debug = true  #turns on/off debug room
 var tutorialStage = false #turns on/off tutorial room 
 var playerSprite

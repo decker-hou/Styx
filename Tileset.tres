@@ -6,10 +6,10 @@
 [ext_resource path="res://assets/pool_autotile.png" type="Texture" id=4]
 [ext_resource path="res://assets/centaur_heart.png" type="Texture" id=5]
 [ext_resource path="res://assets/urn.png" type="Texture" id=6]
-[ext_resource path="res://assets/item_kiss.png" type="Texture" id=7]
+[ext_resource path="res://assets/heal_pool.png" type="Texture" id=7]
 [ext_resource path="res://assets/crystal.png" type="Texture" id=8]
 [ext_resource path="res://assets/door_locked.png" type="Texture" id=9]
-[ext_resource path="res://assets/sparkle.png" type="Texture" id=10]
+[ext_resource path="res://assets/heal_pool_empty.png" type="Texture" id=10]
 [ext_resource path="res://assets/skull.png" type="Texture" id=11]
 [ext_resource path="res://assets/boon_artemis.png" type="Texture" id=12]
 [ext_resource path="res://assets/door.png" type="Texture" id=13]
@@ -187,7 +187,7 @@ resource_local_to_scene = true
 13/navigation_offset = Vector2( 0, 0 )
 13/shapes = [  ]
 13/z_index = 0
-14/name = "shopitem"
+14/name = "healing"
 14/texture = ExtResource( 7 )
 14/tex_offset = Vector2( 0, 0 )
 14/modulate = Color( 1, 1, 1, 1 )
@@ -217,7 +217,7 @@ resource_local_to_scene = true
 16/navigation_offset = Vector2( 0, 0 )
 16/shapes = [  ]
 16/z_index = 0
-17/name = "interactable 17"
+17/name = "pool_empty"
 17/texture = ExtResource( 10 )
 17/tex_offset = Vector2( 0, 0 )
 17/modulate = Color( 1, 1, 1, 1 )
